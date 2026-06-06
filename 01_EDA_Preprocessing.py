@@ -183,6 +183,30 @@ plt.savefig(str(OUTPUT_DIR / 'distribusi_pasien.png'), dpi=150, bbox_inches='tig
 plt.show()
 print("✅ Gambar disimpan: preprocessed_data/distribusi_pasien.png")
 
+# Kesimpulan Distribusi
+print("\n" + "─" * 70)
+print("📝 KESIMPULAN DISTRIBUSI DATA PASIEN:")
+print("─" * 70)
+pvc_n = (df_diagnosis['Type']=='PVC').sum()
+vt_n = (df_diagnosis['Type']=='VT').sum()
+right_n = (df_diagnosis['LeftRight']=='Right').sum()
+left_n = (df_diagnosis['LeftRight']=='Left').sum()
+top_subloc = df_diagnosis['Sublocation'].value_counts().head(3)
+print(f"""
+1. IMBALANCE TIPE: Dataset sangat didominasi PVC ({pvc_n} kasus, {pvc_n/len(df_diagnosis)*100:.1f}%)
+   vs VT hanya {vt_n} kasus ({vt_n/len(df_diagnosis)*100:.1f}%). Rasio PVC:VT = {pvc_n/max(vt_n,1):.0f}:1.
+
+2. IMBALANCE LATERALITAS: Right ({right_n}, {right_n/len(df_diagnosis)*100:.1f}%) mendominasi
+   dibanding Left ({left_n}, {left_n/len(df_diagnosis)*100:.1f}%). Rasio ~{right_n/max(left_n,1):.1f}:1.
+   → Mayoritas PVC berasal dari Right Ventricular Outflow Tract (RVOT).
+
+3. SUBLOKASI TERBANYAK: {', '.join([f'{s} ({c})' for s, c in top_subloc.items()])}.
+   Distribusi tidak merata → perlu stratified splitting.
+
+4. GENDER: Female ({(df_diagnosis['Gender']=='female').sum()}) > Male ({(df_diagnosis['Gender']=='male').sum()}).
+   Perlu diperhatikan apakah gender mempengaruhi pola EKG.
+""")
+
 # %%
 # Crosstab: Sublocation by LeftRight
 fig, ax = plt.subplots(figsize=(14, 8))
@@ -207,6 +231,26 @@ plt.tight_layout()
 plt.savefig(str(OUTPUT_DIR / 'sublokasi_lateralitas.png'), dpi=150, bbox_inches='tight')
 plt.show()
 print("✅ Gambar disimpan: preprocessed_data/sublokasi_lateralitas.png")
+
+# Kesimpulan Crosstab
+print("\n" + "─" * 70)
+print("📝 KESIMPULAN SUBLOKASI vs LATERALITAS:")
+print("─" * 70)
+right_subs = sorted(df_diagnosis[df_diagnosis['LeftRight']=='Right']['Sublocation'].dropna().unique())
+left_subs = sorted(df_diagnosis[df_diagnosis['LeftRight']=='Left']['Sublocation'].dropna().unique())
+print(f"""
+1. MAPPING EKSKLUSIF: Setiap sublokasi hanya muncul di SATU sisi (Right ATAU Left),
+   tidak ada sublokasi yang muncul di kedua sisi.
+
+2. SUBLOKASI RIGHT (RVOT): {', '.join(right_subs)}
+   → Merupakan area Right Ventricular Outflow Tract dan sekitarnya.
+
+3. SUBLOKASI LEFT (LVOT): {', '.join(left_subs)}
+   → Merupakan area Left Ventricular Outflow Tract (aortic cusps & summit).
+
+4. IMPLIKASI: Label LeftRight (Right/Left) sudah cukup sebagai label utama
+   untuk tahap awal lokalisasi, karena sublokasi secara natural terpisah.
+""")
 
 # %%
 # Cross-tab: Gender by LeftRight
@@ -237,6 +281,22 @@ for container in axes[1].containers:
 plt.tight_layout()
 plt.savefig(str(OUTPUT_DIR / 'gender_analysis.png'), dpi=150, bbox_inches='tight')
 plt.show()
+
+# Kesimpulan Gender
+print("\n" + "─" * 70)
+print("📝 KESIMPULAN ANALISIS GENDER:")
+print("─" * 70)
+print(f"""
+1. DISTRIBUSI GENDER: Dataset didominasi female ({(df_diagnosis['Gender']=='female').sum()}/{len(df_diagnosis)}).
+   Ini perlu dipertimbangkan dalam interpretasi hasil model.
+
+2. GENDER vs LATERALITAS: Proporsi Right vs Left relatif konsisten
+   di kedua gender → Gender kemungkinan bukan confounding factor utama
+   untuk prediksi lateralitas.
+
+3. GENDER vs TIPE: Baik PVC maupun VT lebih banyak pada female,
+   sesuai dengan proporsi gender keseluruhan dataset.
+""")
 
 # %% [markdown]
 # ---
@@ -326,6 +386,24 @@ ax.tick_params(axis='x', rotation=20)
 plt.tight_layout()
 plt.savefig(str(OUTPUT_DIR / 'missing_values.png'), dpi=150, bbox_inches='tight')
 plt.show()
+
+# Kesimpulan Missing Values
+print("\n" + "─" * 70)
+print("📝 KESIMPULAN MISSING VALUES:")
+print("─" * 70)
+n_missing_subloc = df_diagnosis['Sublocation'].isnull().sum()
+print(f"""
+1. HANYA Sublocation yang memiliki missing values ({n_missing_subloc}/{len(df_diagnosis)}, {n_missing_subloc/len(df_diagnosis)*100:.1f}%).
+   Kolom lain (HospitalID, Type, LeftRight, Gender) lengkap 100%.
+
+2. Semua {n_missing_subloc} pasien dengan Sublocation kosong TETAP memiliki label LeftRight.
+   → Label LeftRight dapat digunakan untuk semua pasien tanpa data loss.
+
+3. IMPLIKASI UNTUK MODELING:
+   - Jika menggunakan LeftRight sebagai label: 0% data loss
+   - Jika menggunakan Sublocation sebagai label: {n_missing_subloc} pasien harus di-drop
+   → Disarankan menggunakan LeftRight sebagai label utama untuk baseline.
+""")
 
 # %% [markdown]
 # ---
