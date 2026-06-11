@@ -607,6 +607,11 @@ for model_name in MODEL_NAMES:
     for m in ['accuracy', 'sensitivity', 'specificity', 'f1', 'auc']:
         row[f'{m}_mean'] = df_r[m].mean()
         row[f'{m}_std'] = df_r[m].std()
+    
+    # Calculate average best epoch for final training
+    avg_best_epoch = int(np.round(df_r['best_epoch'].mean()))
+    row['avg_best_epoch'] = avg_best_epoch
+    
     comparison_data.append(row)
 
 df_comparison = pd.DataFrame(comparison_data)
@@ -616,104 +621,123 @@ metrics_list = ['accuracy', 'sensitivity', 'specificity', 'f1', 'auc']
 print(f"\n{'Model':<28}", end="")
 for m in metrics_list:
     print(f" {m.capitalize():<16}", end="")
-print()
-print("─" * 108)
+print(f" {'AvgBestEp':<10}")
+print("─" * 120)
 for _, row in df_comparison.iterrows():
     print(f"{row['Model']:<28}", end="")
     for m in metrics_list:
         print(f" {row[f'{m}_mean']:.3f}±{row[f'{m}_std']:.3f}     ", end="")
-    print()
+    print(f" {row['avg_best_epoch']:<10.0f}")
 
 # Best model
 best_model_name = df_comparison.loc[df_comparison['f1_mean'].idxmax(), 'Model']
-print(f"\n🏆 Best Model (by F1): {best_model_name}")
+best_avg_epoch = df_comparison.loc[df_comparison['f1_mean'].idxmax(), 'avg_best_epoch']
+best_idx = MODEL_NAMES.index(best_model_name)
+print(f"\n🏆 Best Model (by F1): {best_model_name} (Avg Best Epoch: {best_avg_epoch})")
 
 # %%
-# Visualisasi perbandingan
-fig, axes = plt.subplots(1, 3, figsize=(24, 7))
-fig.suptitle('Perbandingan 3 Varian CNN-Transformer — K-Fold CV',
-             fontsize=18, fontweight='bold')
+# Visualisasi perbandingan Training vs Validation selama K-Fold
+fig, axes = plt.subplots(1, 3, figsize=(24, 6))
+fig.suptitle('K-Fold Cross Validation: Training vs Validation Accuracy', fontsize=18, fontweight='bold', y=1.05)
 
-# Bar chart metrik
-ax = axes[0]
-x = np.arange(len(metrics_list))
-width = 0.25
-for i, (model_name, color) in enumerate(zip(MODEL_NAMES, MODEL_COLORS)):
-    vals = [df_comparison.loc[df_comparison['Model'] == model_name, f'{m}_mean'].values[0] for m in metrics_list]
-    stds = [df_comparison.loc[df_comparison['Model'] == model_name, f'{m}_std'].values[0] for m in metrics_list]
-    bars = ax.bar(x + i * width, vals, width, label=model_name, color=color, alpha=0.85, yerr=stds, capsize=3)
-ax.set_xticks(x + width)
-ax.set_xticklabels([m.capitalize() for m in metrics_list], fontsize=11)
-ax.set_ylim(0, 1.15)
-ax.set_title('Metrik Rata-rata ± Std', fontsize=14, fontweight='bold')
-ax.legend(fontsize=9)
-ax.spines[['top', 'right']].set_visible(False)
-
-# Learning curves (F1)
-ax = axes[1]
-for model_name, color in zip(MODEL_NAMES, MODEL_COLORS):
-    all_f1 = [h['val_f1'] for h in all_histories[model_name]]
-    max_len = max(len(f) for f in all_f1)
-    padded = [f + [f[-1]] * (max_len - len(f)) for f in all_f1]
-    mean_f1 = np.mean(padded, axis=0)
-    std_f1 = np.std(padded, axis=0)
-    epochs_ax = np.arange(max_len)
-    ax.plot(epochs_ax, mean_f1, color=color, linewidth=2, label=model_name)
-    ax.fill_between(epochs_ax, mean_f1 - std_f1, mean_f1 + std_f1, alpha=0.15, color=color)
-ax.set_title('Val F1-Score (Mean ± Std)', fontsize=14, fontweight='bold')
-ax.set_xlabel('Epoch')
-ax.set_ylabel('F1-Score')
-ax.legend(fontsize=9)
-ax.spines[['top', 'right']].set_visible(False)
-
-# Radar chart
-ax = axes[2]
-ax.axis('off')
-summary_text = "📊 K-Fold CV Summary\n" + "─" * 32 + "\n\n"
-for model_name in MODEL_NAMES:
-    df_r = pd.DataFrame(all_results[model_name])
-    summary_text += f"▸ {model_name}\n"
-    for m in metrics_list:
-        summary_text += f"    {m:>13s}: {df_r[m].mean():.3f} ± {df_r[m].std():.3f}\n"
-    summary_text += "\n"
-summary_text += f"🏆 Best: {best_model_name}"
-ax.text(0.05, 0.5, summary_text, transform=ax.transAxes, fontsize=11,
-        va='center', fontfamily='monospace',
-        bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.5))
+for i, model_name in enumerate(MODEL_NAMES):
+    ax = axes[i]
+    color = MODEL_COLORS[i]
+    
+    # Ambil history dari 5 fold
+    histories = all_histories[model_name]
+    max_len = max(len(h['val_acc']) for h in histories)
+    
+    # Pad array
+    val_accs = np.array([h['val_acc'] + [h['val_acc'][-1]]*(max_len - len(h['val_acc'])) for h in histories])
+    
+    mean_val = np.mean(val_accs, axis=0)
+    std_val = np.std(val_accs, axis=0)
+    
+    epochs = np.arange(max_len)
+    ax.plot(epochs, mean_val, color=color, linewidth=2, label='Validation Acc (Mean)')
+    ax.fill_between(epochs, mean_val - std_val, mean_val + std_val, alpha=0.2, color=color)
+    
+    ax.set_title(f'{model_name}', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Epochs')
+    ax.set_ylabel('Accuracy')
+    ax.grid(True, alpha=0.3)
+    ax.legend()
 
 plt.tight_layout()
-plt.savefig(str(OUTPUT_DIR / 'model_comparison_kfold.png'), dpi=150, bbox_inches='tight')
+plt.savefig(str(OUTPUT_DIR / 'kfold_train_val_curves.png'), dpi=150, bbox_inches='tight')
 plt.show()
 
 # %% [markdown]
 # ---
-# ## 9. Final Testing (20% DWT Data)
+# ## 9. Final Model Training
 # 
-# **PENTING:** Menggunakan data DWT (sesuai Proposal TA), BUKAN data raw.
-# Menggunakan model terbaik dari hasil K-Fold.
-# Metrik yang dievaluasi: Accuracy, Sensitivity, Specificity, F1-Score, AUC-ROC, Confusion Matrix.
+# **PENTING:** Melatih ulang model terbaik ({best_model_name}) menggunakan **seluruh 80% data training** sebanyak rata-rata best epoch ({best_avg_epoch}), tanpa validation split lagi.
+
+# %%
+print("=" * 70)
+print(f"🔥 FINAL MODEL TRAINING ({best_model_name})")
+print(f"   Menggunakan 100% dari data training (N={len(X_train_scaled)})")
+print(f"   Target Epochs: {best_avg_epoch}")
+print("=" * 70)
+
+# Initialize best model architecture fresh
+final_model = model_classes[best_idx](CONFIG).to(DEVICE)
+criterion_final = nn.CrossEntropyLoss(weight=class_weights.to(DEVICE))
+optimizer_final = optim.AdamW(final_model.parameters(), lr=CONFIG['learning_rate'], weight_decay=CONFIG['weight_decay'])
+
+# DataLoader untuk seluruh data training 80%
+final_train_loader = DataLoader(
+    ECGDataset(X_train_scaled, y_train_all), 
+    batch_size=CONFIG['batch_size'], 
+    shuffle=True, 
+    drop_last=True
+)
+
+final_history = {'train_loss': [], 'train_acc': []}
+
+for epoch in range(best_avg_epoch):
+    t0 = time.time()
+    tr_loss, tr_acc = train_one_epoch(final_model, final_train_loader, criterion_final, optimizer_final, DEVICE)
+    
+    final_history['train_loss'].append(tr_loss)
+    final_history['train_acc'].append(tr_acc)
+    
+    if (epoch + 1) % 5 == 0 or epoch == 0 or epoch == best_avg_epoch - 1:
+        print(f"   Ep {epoch+1:3d}/{best_avg_epoch} | TrLoss {tr_loss:.4f} | TrAcc {tr_acc:.3f} | {time.time()-t0:.1f}s")
+
+print("\n✅ Final Model Training Selesai!")
+
+# Visualisasi Final Training
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.plot(final_history['train_acc'], color='#059669', label='Train Accuracy', linewidth=2)
+ax.set_title(f'Final Training Progress - {best_model_name}', fontweight='bold')
+ax.set_xlabel('Epoch')
+ax.set_ylabel('Accuracy')
+ax.grid(True, alpha=0.3)
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# ---
+# ## 10. Final Testing (20% DWT Data)
+# 
+# Menggunakan **Final Model** yang baru saja dilatih pada 20% data testing yang tidak pernah dilihat sebelumnya.
 
 # %%
 print("=" * 70)
 print(f"🧪 FINAL TESTING — 20% DWT DATA ({len(X_test_scaled)} segments)")
-print(f"   Model Terbaik: {best_model_name}")
 print("=" * 70)
 
-# Load best model overall
-best_idx = MODEL_NAMES.index(best_model_name)
-best_fold_idx = np.argmax([h['val_f1'] for h in all_histories[best_model_name]])
-best_model_state = all_best_models[best_model_name][best_fold_idx]
-
-best_model = model_classes[best_idx](CONFIG).to(DEVICE)
-best_model.load_state_dict({k: v.to(DEVICE) for k, v in best_model_state.items()})
-best_model.eval()
+final_model.eval()
 
 # Test DataLoader
 test_loader = DataLoader(ECGDataset(X_test_scaled, y_test_all), batch_size=CONFIG['batch_size'], shuffle=False)
 
 # Evaluasi tingkat segmen
 test_metrics, test_preds, test_probs, test_labels = evaluate(
-    best_model, test_loader, nn.CrossEntropyLoss(), DEVICE
+    final_model, test_loader, nn.CrossEntropyLoss(), DEVICE
 )
 
 print("\n📊 Segment-Level Metrics:")
@@ -805,11 +829,9 @@ plt.show()
 
 # %% [markdown]
 # ---
-# ## 10. SHAP Explainability (Model Terbaik)
+# ## 11. SHAP Explainability (Model Utama)
 # 
-# Menggunakan SHAP GradientExplainer untuk analisis interpretability pada model terbaik.
-# - Lead mana yang paling penting untuk klasifikasi?
-# - Bagian temporal mana dari sinyal yang berpengaruh?
+# Menggunakan SHAP GradientExplainer untuk analisis interpretability pada model Final.
 
 # %%
 import shap
@@ -828,26 +850,28 @@ exp_data = torch.FloatTensor(X_test_scaled[exp_idx]).to(DEVICE)
 exp_labels = y_test_all[exp_idx]
 
 print("\n⏳ Computing SHAP values (GradientExplainer)...")
-best_model.eval()
+final_model.eval()
 
 try:
-    explainer = shap.GradientExplainer(best_model, background)
+    explainer = shap.GradientExplainer(final_model, background)
     shap_values = explainer.shap_values(exp_data)
     shap_vals = shap_values[1] if isinstance(shap_values, list) else shap_values
     print("✅ SHAP computed successfully!")
-    shap_computed = True
 except Exception as e:
     print(f"⚠️ SHAP GradientExplainer failed: {e}")
     print("   Falling back to manual gradient-based importance...")
     exp_data_grad = exp_data.clone().requires_grad_(True)
-    out = best_model(exp_data_grad)
+    out = final_model(exp_data_grad)
     out[:, 1].sum().backward()
     shap_vals = exp_data_grad.grad.cpu().numpy()
     print("✅ Gradient-based importance computed!")
-    shap_computed = False
+
+# Pastikan shap_vals 3D (N, 12, L) untuk kelas target (indeks 1)
+if len(shap_vals.shape) == 4:
+    shap_vals = shap_vals[..., 1]
 
 # %%
-# Analisis per-lead importance
+# Analisis per-lead importance (Bar Chart Sederhana)
 lead_imp = np.abs(shap_vals).mean(axis=(0, 2))
 lead_imp_df = pd.DataFrame({'Lead': LEADS, 'Importance': lead_imp}).sort_values('Importance', ascending=False)
 
@@ -857,9 +881,29 @@ for _, row in lead_imp_df.iterrows():
     bar = '█' * int(row['Importance'] / lead_imp_df['Importance'].max() * 30)
     print(f"{row['Lead']:<8} {row['Importance']:<12.6f} {bar}")
 
+# %%
+# Visualisasi SHAP Beeswarm Plot (Summary Plot)
+print("\n📊 Generating SHAP Beeswarm Summary Plot...")
+
+# Untuk merangkum fitur time-series (N, 12, L) menjadi (N, 12) untuk beeswarm plot:
+# 1. SHAP Impact (X-axis): Total net impact dari lead tersebut pada prediksi (sum over time)
+shap_vals_2d = shap_vals.sum(axis=2) 
+
+# 2. Feature Value (Color): Kekuatan sinyal aktual dari lead tersebut (menggunakan standar deviasi / amplitudo)
+exp_data_np = exp_data.cpu().numpy()
+features_2d = np.std(exp_data_np, axis=2)
+
+fig = plt.figure(figsize=(12, 8))
+# Tampilkan beeswarm plot dari library SHAP
+shap.summary_plot(shap_vals_2d, features=features_2d, feature_names=LEADS, show=False)
+plt.title(f'SHAP Summary Plot (Beeswarm) - {best_model_name}\n', fontsize=16, fontweight='bold')
+plt.tight_layout()
+plt.savefig(str(OUTPUT_DIR / 'shap_summary_beeswarm.png'), dpi=150, bbox_inches='tight')
+plt.show()
+
 # %% [markdown]
 # ---
-# ## 11. Ringkasan & Simpan Hasil
+# ## 12. Ringkasan & Simpan Hasil
 
 # %%
 print("\n" + "=" * 70)
@@ -882,8 +926,9 @@ print(f"   ✅ Lead importance: {OUTPUT_DIR / 'lead_importance.csv'}")
 with open(OUTPUT_DIR / 'config.json', 'w') as f:
     json.dump({k: str(v) if isinstance(v, list) else v for k, v in CONFIG.items()}, f, indent=2)
 
-torch.save(best_model_state, OUTPUT_DIR / f'best_model_{best_model_name.replace(" ", "_")}.pth')
-print(f"   ✅ Best model saved.")
+final_state = {k: v.cpu().clone() for k, v in final_model.state_dict().items()}
+torch.save(final_state, OUTPUT_DIR / f'final_model_{best_model_name.replace(" ", "_")}.pth')
+print(f"   ✅ Final model saved.")
 
 # %%
 print("\n" + "=" * 70)
@@ -892,14 +937,14 @@ print("=" * 70)
 
 print(f"""
 🔬 PIPELINE:
-   DATA DWT → 80/20 Split → 5-Fold CV → CNN (Ext) → 3 Transformers → Test (20% DWT) → SHAP
+   DATA DWT → 80/20 Split → 5-Fold CV (Penguat) → 100% Training Model Final → Test (20% DWT) → SHAP
 
-🏆 PERBANDINGAN MODEL (K-Fold F1-Score):
+🏆 PERBANDINGAN MODEL K-FOLD (F1-Score):
    1. {MODEL_NAMES[0]:<25}: {df_comparison.loc[0, 'f1_mean']:.3f} ± {df_comparison.loc[0, 'f1_std']:.3f}
    2. {MODEL_NAMES[1]:<25}: {df_comparison.loc[1, 'f1_mean']:.3f} ± {df_comparison.loc[1, 'f1_std']:.3f}
    3. {MODEL_NAMES[2]:<25}: {df_comparison.loc[2, 'f1_mean']:.3f} ± {df_comparison.loc[2, 'f1_std']:.3f}
 
-🏅 MODEL TERBAIK: {best_model_name}
+🏅 FINAL MODEL: {best_model_name} (Dilatih ulang selama {best_avg_epoch} epochs)
 
 🧪 FINAL TEST (20% DWT Data) — Patient Level:
    • Accuracy   : {patient_metrics['accuracy']:.3f}
@@ -914,6 +959,4 @@ print(f"""
    → Notebook 3: Fine-Tuning (GAN augmentation → Grid Search → CNN-Transformer)
 """)
 
-print("✅ Notebook 02 Baseline CNN-Transformer (Revisi) SELESAI!")
-
-
+print("✅ Notebook 02 Baseline CNN-Transformer (2-Stage Training) SELESAI!")

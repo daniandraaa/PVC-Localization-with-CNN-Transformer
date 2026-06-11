@@ -756,18 +756,50 @@ print(f"📦 PyWavelets version: {pywt.__version__}")
 print(f"📋 Available wavelets: {pywt.wavelist()[:20]}...")
 
 # %%
-def dwt_denoise(signal_data, wavelet='db4', level=4, threshold_mode='soft'):
+def sure_threshold(coeffs, sigma):
     """
-    Denoising sinyal EKG menggunakan Discrete Wavelet Transform (DWT).
+    Menghitung Stein's Unbiased Risk Estimate (SURE) threshold dengan noise scaling.
+    """
+    n = len(coeffs)
+    if n == 0 or sigma == 0:
+        return 0.0
+        
+    # Skalakan koefisien agar varians noise ≈ 1
+    norm_coeffs = coeffs / sigma
+    a = np.sort(np.abs(norm_coeffs))**2
+    
+    c = np.linspace(n-1, 0, n)
+    s = np.cumsum(a)
+    risk = (n - 2 * np.arange(1, n+1) + s + c * a) / n
+    
+    best_idx = np.argmin(risk)
+    # Kembalikan threshold ke skala asli
+    return np.sqrt(a[best_idx]) * sigma
+
+def baseline_wander_removal(signal_data, fs=1000, cutoff=0.5):
+    """
+    Menghilangkan baseline wander menggunakan Butterworth High-Pass Filter.
+    """
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff / nyq
+    # Orde 4 Butterworth filter
+    b, a = signal.butter(4, normal_cutoff, btype='high', analog=False)
+    # Gunakan filtfilt agar tidak ada pergeseran fasa (zero-phase filtering)
+    filtered_signal = signal.filtfilt(b, a, signal_data)
+    return filtered_signal
+
+def dwt_denoise(signal_data, wavelet='coif5', level=5, threshold_mode='soft'):
+    """
+    Denoising sinyal EKG: High-Pass Filter (Baseline Wander) + DWT (High-freq noise).
     
     Parameters:
     -----------
     signal_data : array-like
         Sinyal input (1D)
     wavelet : str
-        Tipe wavelet (default: 'db4' - Daubechies 4, cocok untuk EKG)
+        Tipe wavelet (default: 'coif5', cocok untuk EKG)
     level : int
-        Level dekomposisi (default: 4)
+        Level dekomposisi (default: 5, agar mencakup noise 25 Hz)
     threshold_mode : str
         Mode thresholding ('soft' atau 'hard')
     
@@ -778,18 +810,20 @@ def dwt_denoise(signal_data, wavelet='db4', level=4, threshold_mode='soft'):
     coeffs : list
         Koefisien wavelet
     """
-    # Dekomposisi wavelet
-    coeffs = pywt.wavedec(signal_data, wavelet, level=level)
+    # 1. Hilangkan Baseline Wander (Low-frequency noise) terlebih dahulu
+    signal_no_baseline = baseline_wander_removal(signal_data, fs=1000, cutoff=0.5)
+
+    # 2. Dekomposisi wavelet untuk menghilangkan high-frequency noise
+    coeffs = pywt.wavedec(signal_no_baseline, wavelet, level=level)
     
-    # Estimasi threshold menggunakan metode VisuShrink (Universal Threshold)
-    # sigma = MAD(detail coefficients) / 0.6745
-    detail_coeffs = coeffs[-1]  # Level detail tertinggi
-    sigma = np.median(np.abs(detail_coeffs)) / 0.6745
-    threshold = sigma * np.sqrt(2 * np.log(len(signal_data)))
-    
-    # Terapkan thresholding pada koefisien detail (bukan approximation)
+    # Terapkan SURE thresholding pada koefisien detail (bukan approximation)
     coeffs_thresholded = [coeffs[0]]  # Keep approximation coefficients
     for i in range(1, len(coeffs)):
+        # Estimasi standar deviasi noise (sigma) SECARA SPESIFIK untuk setiap level
+        sigma = np.median(np.abs(coeffs[i])) / 0.6745
+        
+        # Hitung SURE threshold dengan scaling sigma
+        threshold = sure_threshold(coeffs[i], sigma)
         coeffs_thresholded.append(
             pywt.threshold(coeffs[i], threshold, mode=threshold_mode)
         )
@@ -813,12 +847,12 @@ ecg_demo = load_ecg(pid_demo, RAW_ECG_DIR)
 # Denoise Lead II sebagai contoh
 lead_demo = 'II'
 raw_signal = ecg_demo[lead_demo].values
-denoised_signal, coeffs = dwt_denoise(raw_signal, wavelet='db4', level=4)
+denoised_signal, coeffs = dwt_denoise(raw_signal, wavelet='coif5', level=5)
 noise_removed = raw_signal - denoised_signal
 
 # Visualisasi
 fig, axes = plt.subplots(3, 1, figsize=(20, 12), sharex=True)
-fig.suptitle(f'DWT Denoising (db4, level=4) - Pasien {pid_demo} Lead {lead_demo}\n'
+fig.suptitle(f'Preprocessing (HPF 0.5Hz + DWT coif5 level=5 SURE) - Pasien {pid_demo} Lead {lead_demo}\n'
              f'Sublokasi: {subloc_demo}', fontsize=16, fontweight='bold')
 
 duration_plot = 3  # detik
@@ -830,9 +864,12 @@ axes[0].set_title('Sinyal Asli (Raw)', fontsize=13, fontweight='bold')
 axes[0].set_ylabel('Amplitudo')
 axes[0].spines[['top', 'right']].set_visible(False)
 
-axes[1].plot(time_plot, denoised_signal[:end_plot], color='#059669', linewidth=0.7)
-axes[1].set_title('Sinyal Setelah DWT Denoising', fontsize=13, fontweight='bold')
+# Plot Sinyal Denoised (dengan bayangan sinyal asli di belakangnya agar terlihat perbedaannya)
+axes[1].plot(time_plot, raw_signal[:end_plot], color='#94A3B8', linewidth=0.5, alpha=0.6, label='Raw Signal')
+axes[1].plot(time_plot, denoised_signal[:end_plot], color='mediumaquamarine', linewidth=1.5, label='Denoised Signal')
+axes[1].set_title(f'Sinyal Setelah DWT Denoising (Level 5)', fontweight='bold')
 axes[1].set_ylabel('Amplitudo')
+axes[1].legend(loc='upper right')
 axes[1].spines[['top', 'right']].set_visible(False)
 
 axes[2].plot(time_plot, noise_removed[:end_plot], color='#DC2626', linewidth=0.5, alpha=0.7)
@@ -856,11 +893,11 @@ print(f"   Signal RMS (denoised): {np.sqrt(np.mean(denoised_signal**2)):.2f}")
 # %%
 # Visualisasi Wavelet Decomposition
 fig, axes = plt.subplots(len(coeffs), 1, figsize=(20, 3*len(coeffs)))
-fig.suptitle(f'DWT Decomposition (db4, level=4) - Pasien {pid_demo} Lead {lead_demo}',
+fig.suptitle(f'DWT Decomposition (coif5, level=5) - Pasien {pid_demo} Lead {lead_demo}',
              fontsize=16, fontweight='bold', y=1.01)
 
-labels = ['Approximation (cA4)'] + [f'Detail Level {i} (cD{i})' for i in range(4, 0, -1)]
-colors_dwt = ['#2563EB', '#7C3AED', '#DC2626', '#D97706', '#059669']
+labels = ['Approximation (cA5)'] + [f'Detail Level {i} (cD{i})' for i in range(5, 0, -1)]
+colors_dwt = ['#2563EB', '#7C3AED', '#DC2626', '#D97706', '#059669', '#3B82F6']
 
 for i, (coeff, label, color) in enumerate(zip(coeffs, labels, colors_dwt)):
     axes[i].plot(coeff, color=color, linewidth=0.5)
@@ -876,8 +913,8 @@ plt.show()
 # %%
 # Demonstrasi DWT denoising pada semua 12 lead
 fig, axes = plt.subplots(6, 2, figsize=(22, 20))
-fig.suptitle(f'DWT Denoising Semua 12 Lead - Pasien {pid_demo}\n'
-             f'(db4, level=4, soft thresholding)',
+fig.suptitle(f'Preprocessing Semua 12 Lead - Pasien {pid_demo}\n'
+             f'(HPF 0.5Hz + DWT coif5 level=5 SURE soft thresholding)',
              fontsize=16, fontweight='bold', y=1.02)
 
 lead_positions = [
@@ -896,7 +933,7 @@ time_all = np.arange(end_all) / SAMPLING_RATE
 for lead_name, row, col in lead_positions:
     ax = axes[row, col]
     raw_sig = ecg_demo[lead_name].values
-    den_sig, _ = dwt_denoise(raw_sig)
+    den_sig, _ = dwt_denoise(raw_sig, level=5)
     
     ax.plot(time_all, raw_sig[:end_all], color='#94A3B8', linewidth=0.5, alpha=0.6, label='Raw')
     ax.plot(time_all, den_sig[:end_all], color=LEAD_COLORS[lead_name], linewidth=0.7, label='Denoised')
@@ -934,7 +971,7 @@ for idx, row in df_diagnosis.iterrows():
         ecg_denoised = pd.DataFrame()
         
         for lead in leads:
-            denoised, _ = dwt_denoise(ecg_raw[lead].values, wavelet='db4', level=4)
+            denoised, _ = dwt_denoise(ecg_raw[lead].values, wavelet='coif5', level=5)
             ecg_denoised[lead] = denoised
         
         ecg_denoised.to_csv(DWT_OUTPUT_DIR / f"{hid}.csv", index=False)
@@ -1165,7 +1202,7 @@ print(f"""
    • Mean Durasi        : {df_stats['duration_sec'].mean():.1f} detik
 
 🔧 PREPROCESSING:
-   • DWT Denoising      : db4, level=4, soft thresholding
+   • Denoising Pipeline : High-Pass Filter (0.5Hz) + DWT (coif5, level=5, SURE soft thresholding)
    • Data Splitting     : 80% train ({len(X_train)}), 20% test ({len(X_test)})
    • Stratifikasi       : Berdasarkan LeftRight (Right/Left)
 

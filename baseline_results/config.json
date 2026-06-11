@@ -1,0 +1,18 @@
+{
+  "segment_length": 5000,
+  "sampling_rate": 1000,
+  "n_leads": 12,
+  "n_folds": 5,
+  "batch_size": 32,
+  "epochs": 50,
+  "learning_rate": 0.001,
+  "weight_decay": 0.0001,
+  "patience": 10,
+  "cnn_channels": "[32, 64, 128, 256]",
+  "cnn_kernels": "[7, 5, 3, 3]",
+  "transformer_heads": 4,
+  "transformer_layers": 2,
+  "transformer_dropout": 0.2,
+  "fc_dropout": 0.3,
+  "patch_size": 16
+}
