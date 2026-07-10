@@ -2,6 +2,7 @@
   "segment_length": 5000,
   "sampling_rate": 1000,
   "n_leads": 12,
+  "n_classes": 3,
   "n_folds": 5,
   "batch_size": 32,
   "epochs": 50,
