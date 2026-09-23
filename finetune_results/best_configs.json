@@ -1,0 +1,20 @@
+{
+  "Transformer Encoder": {
+    "learning_rate": 0.0005,
+    "batch_size": 64,
+    "transformer_dropout": 0.2,
+    "weight_decay": 1e-05
+  },
+  "PatchTST": {
+    "learning_rate": 0.0003,
+    "batch_size": 32,
+    "transformer_dropout": 0.2,
+    "weight_decay": 0.0001
+  },
+  "Hierarchical Transformer": {
+    "learning_rate": 0.0001,
+    "batch_size": 16,
+    "transformer_dropout": 0.3,
+    "weight_decay": 0.0001
+  }
+}
